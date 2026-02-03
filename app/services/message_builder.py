@@ -1,5 +1,5 @@
 import html
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from app.db.models import ScheduleItem
 
 class ParseMode:
@@ -14,6 +14,83 @@ WEEKDAYS = {
     5: "Суббота",
     6: "Воскресенье",
 }
+
+WEEKDAY_ABBRS = {
+    0: "Пн",
+    1: "Вт",
+    2: "Ср",
+    3: "Чт",
+    4: "Пт",
+    5: "Сб",
+    6: "Вс",
+}
+
+WEEK_SEPARATOR = "━━━━━━━━━━━━━━"
+
+STATUS_HAS_CLASSES = "🟧"
+STATUS_NO_CLASSES = "🟩"
+
+
+def _parse_hhmm(value: str) -> time | None:
+    raw = (value or "").strip()
+    if len(raw) >= 5:
+        raw = raw[:5]
+    try:
+        return datetime.strptime(raw, "%H:%M").time()
+    except Exception:
+        return None
+
+
+def _build_day_body(items: list[ScheduleItem]) -> str:
+    lines: list[str] = []
+    if not items:
+        return "Занятий нет 🎉"
+
+    for item in items:
+        start_time = html.escape(str(item.start_time)) if item.start_time is not None else ""
+        end_time = html.escape(str(item.end_time)) if item.end_time is not None else ""
+        time_str = f"{start_time}-{end_time}".strip("-")
+
+        block_lines: list[str] = []
+        block_lines.append(f"🕘 {time_str}".rstrip())
+
+        if item.subject:
+            block_lines.append(html.escape(str(item.subject)))
+
+        if item.teacher:
+            teacher = html.escape(str(item.teacher))
+            block_lines.append(f"Преподаватель: {teacher}")
+
+        if item.room:
+            block_lines.append(f"🏛 {html.escape(str(item.room))}")
+
+        lines.append("\n".join(block_lines).rstrip())
+
+    return "\n\n".join(lines).strip()
+
+
+def _get_last_end_time(items: list[ScheduleItem]) -> str | None:
+    if not items:
+        return None
+
+    parsed: list[tuple[time, str]] = []
+    raw_values: list[str] = []
+    for item in items:
+        if not item.end_time:
+            continue
+        raw_values.append(str(item.end_time))
+        parsed_time = _parse_hhmm(str(item.end_time))
+        if parsed_time is not None:
+            parsed.append((parsed_time, str(item.end_time)))
+
+    if parsed:
+        return max(parsed, key=lambda x: x[0])[1][:5]
+
+    if raw_values:
+        return max(raw_values)
+
+    return None
+
 
 def build_day_message(target_date: date, items: list[ScheduleItem], tz: str) -> str:
     """
@@ -31,28 +108,7 @@ def build_day_message(target_date: date, items: list[ScheduleItem], tz: str) -> 
     header = f"📅 {target_date.strftime('%d.%m.%Y')} {weekday_name}"
 
     lines = []
-    if not items:
-        lines.append("Занятий нет 🎉")
-    else:
-        for item in items:
-            start_time = html.escape(str(item.start_time)) if item.start_time is not None else ""
-            end_time = html.escape(str(item.end_time)) if item.end_time is not None else ""
-            time_str = f"{start_time}-{end_time}".strip("-")
-
-            block_lines: list[str] = []
-            block_lines.append(f"🕘 {time_str}".rstrip())
-
-            if item.subject:
-                block_lines.append(html.escape(str(item.subject)))
-
-            if item.teacher:
-                teacher = html.escape(str(item.teacher))
-                block_lines.append(f"Преподаватель: {teacher}")
-
-            if item.room:
-                block_lines.append(f"🏛 {html.escape(str(item.room))}")
-
-            lines.append("\n".join(block_lines).rstrip())
+    lines.append(_build_day_body(items))
 
     return (header + "\n\n" + "\n\n".join(lines)).strip()
 
@@ -76,6 +132,56 @@ def build_range_message(date_from: date, date_to: date, items: list[ScheduleItem
         current = current + timedelta(days=1)
 
     return "\n\n".join(blocks).strip()
+
+
+def build_week_range_message(date_from: date, date_to: date, items: list[ScheduleItem], tz: str) -> str:
+    """
+    Range message for /week and /nextweek with:
+    - summary line with per-day status (🟩/🟧)
+    - second summary line with end time per busy day
+    - day blocks rendered with separators
+    """
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+
+    items_by_date: dict[str, list[ScheduleItem]] = {}
+    for item in items:
+        items_by_date.setdefault(item.date, []).append(item)
+
+    day_list: list[date] = []
+    current = date_from
+    while current <= date_to:
+        day_list.append(current)
+        current = current + timedelta(days=1)
+
+    summary_parts: list[str] = []
+    busy_parts: list[str] = []
+    for day in day_list:
+        day_items = items_by_date.get(day.isoformat(), [])
+        abbr = WEEKDAY_ABBRS.get(day.weekday(), day.strftime("%a"))
+        if day_items:
+            summary_parts.append(f"{abbr}{STATUS_HAS_CLASSES}")
+            last_end = _get_last_end_time(day_items)
+            if last_end:
+                busy_parts.append(f"{abbr} {html.escape(last_end)}")
+        else:
+            summary_parts.append(f"{abbr}{STATUS_NO_CLASSES}")
+
+    summary_line = "  ".join(summary_parts).strip()
+    busy_line = ", ".join(busy_parts).strip() if busy_parts else "Занятий нет 🎉"
+
+    blocks: list[str] = []
+    for day in day_list:
+        weekday_name = WEEKDAYS.get(day.weekday(), day.strftime("%A"))
+        header = (
+            f"{WEEK_SEPARATOR}\n"
+            f"📅 {weekday_name} ({day.strftime('%d.%m')})\n"
+            f"{WEEK_SEPARATOR}"
+        )
+        body = _build_day_body(items_by_date.get(day.isoformat(), []))
+        blocks.append((header + "\n" + body).strip())
+
+    return (summary_line + "\n" + busy_line + "\n\n" + "\n\n".join(blocks)).strip()
 
 def split_telegram(text: str, limit: int = 4096) -> list[str]:
     """

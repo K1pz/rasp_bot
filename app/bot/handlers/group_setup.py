@@ -13,7 +13,7 @@ from app.db.repos.settings_repo import SettingsRepo, resolve_ical_url
 from app.db.repos.setup_tokens_repo import SetupTokenRepo
 from app.services.date_service import get_next_week_window, get_today, get_tomorrow, get_week_window
 from app.services.ical_sync_service import sync_ical_schedule
-from app.services.message_builder import build_day_message, build_range_message, split_telegram, ParseMode
+from app.services.message_builder import build_day_message, build_range_message, build_week_range_message, split_telegram, ParseMode
 from app.services.scheduler_service import apply_schedule
 
 router = Router()
@@ -207,7 +207,15 @@ async def _resolve_chat_context(chat_id: int) -> tuple[str, str | None]:
     return tz, ical_url
 
 
-async def _send_range_schedule(message: Message, date_from: date, date_to: date, tz: str, ical_url: str | None) -> None:
+async def _send_range_schedule(
+    message: Message,
+    date_from: date,
+    date_to: date,
+    tz: str,
+    ical_url: str | None,
+    *,
+    week_style: bool = False,
+) -> None:
     chat_id = message.chat.id
 
     if ical_url:
@@ -223,7 +231,10 @@ async def _send_range_schedule(message: Message, date_from: date, date_to: date,
         schedule_repo = ScheduleRepo(session)
         items = await schedule_repo.get_by_date_range(chat_id, date_from_str, date_to_str)
 
-    message_text = build_range_message(date_from, date_to, items, tz)
+    if week_style:
+        message_text = build_week_range_message(date_from, date_to, items, tz)
+    else:
+        message_text = build_range_message(date_from, date_to, items, tz)
     for chunk in split_telegram(message_text):
         await message.answer(chunk, parse_mode=ParseMode.HTML)
 
@@ -246,11 +257,11 @@ async def group_tomorrow(message: Message) -> None:
 async def group_week(message: Message) -> None:
     tz, ical_url = await _resolve_chat_context(message.chat.id)
     date_from, date_to = get_week_window(tz)
-    await _send_range_schedule(message, date_from, date_to, tz, ical_url)
+    await _send_range_schedule(message, date_from, date_to, tz, ical_url, week_style=True)
 
 
 @router.message(Command("nextweek"), F.chat.type.in_({"group", "supergroup"}))
 async def group_next_week(message: Message) -> None:
     tz, ical_url = await _resolve_chat_context(message.chat.id)
     date_from, date_to = get_next_week_window(tz)
-    await _send_range_schedule(message, date_from, date_to, tz, ical_url)
+    await _send_range_schedule(message, date_from, date_to, tz, ical_url, week_style=True)
