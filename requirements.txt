@@ -1,0 +1,8 @@
+aiogram>=3.0
+APScheduler
+SQLAlchemy>=2.0
+aiosqlite
+pydantic-settings
+python-dotenv
+alembic
+icalendar

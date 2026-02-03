@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    volumes:
+      # Persist SQLite DB across code redeploys (not tied to repo folder on host).
+      # NOTE: `docker compose down -v` will REMOVE this volume.
+      - rasp_bot_data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Moscow
+
+volumes:
+  rasp_bot_data:
+    name: rasp_bot_data
