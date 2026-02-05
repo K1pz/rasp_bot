@@ -9,7 +9,21 @@ def _is_group_command(message: Message) -> bool:
         return False
     command = text.strip().split()[0]
     command_base = command.split("@", 1)[0].lower()
-    allowed = {"/bind", "/setup", "/settings", "/status", "/today", "/tomorrow", "/week", "/nextweek", "/start"}
+    allowed = {
+        "/bind",
+        "/setup",
+        "/settings",
+        "/status",
+        "/today",
+        "/tomorrow",
+        "/week",
+        "/weekbrief",
+        "/week_short",
+        "/nextweek",
+        "/nextweekbrief",
+        "/nextweek_short",
+        "/start",
+    }
     return command_base in allowed
 
 
