@@ -18,8 +18,9 @@
 # Токен бота, полученный от BotFather
 BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 
-# Optional: database URL.
-# Default (works both locally and in Docker with /app/data mounted): sqlite+aiosqlite:///./data/bot.db
+# Optional: database location.
+# You can pass either a SQLAlchemy URL (sqlite:/postgres:/...) or a filesystem path to a SQLite file.
+# Default: sqlite+aiosqlite:///./data/bot.db
 DB_PATH=sqlite+aiosqlite:///./data/bot.db
 
 # ID администратора (опционально). Можно узнать через ботов типа @userinfobot или @raw_data_bot
@@ -34,6 +35,8 @@ TZ=Europe/Moscow
 # Minimum interval between iCal syncs (seconds). 0 = no limit.
 ICAL_SYNC_MIN_INTERVAL_SECONDS=0
 ```
+
+> Деплой на Railway (Volume + авто-деплой без потери SQLite при redeploy): см. [docs/railway.md](docs/railway.md).
 
 ### 3. Запуск через Docker
 Убедитесь, что у вас установлены Docker и Docker Compose.

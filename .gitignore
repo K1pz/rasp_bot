@@ -8,7 +8,12 @@ __pycache__/
 env/
 venv/
 data/
+*.db
+*.sqlite3
 *.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
 *.log
 .pytest_cache/
 .mypy_cache/
