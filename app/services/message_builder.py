@@ -136,10 +136,9 @@ def build_range_message(date_from: date, date_to: date, items: list[ScheduleItem
 
 def build_week_range_message(date_from: date, date_to: date, items: list[ScheduleItem], tz: str) -> str:
     """
-    Range message for /week and /nextweek with:
-    - summary line with per-day status (🟩/🟧)
-    - second summary line with end time per busy day
-    - day blocks rendered with separators
+    Full week message for /week and /nextweek.
+    - Title line: "📅 Ваше расписание!"
+    - Day blocks include only days that have classes
     """
     if date_to < date_from:
         date_from, date_to = date_to, date_from
@@ -154,20 +153,19 @@ def build_week_range_message(date_from: date, date_to: date, items: list[Schedul
         day_list.append(current)
         current = current + timedelta(days=1)
 
-    summary_line, busy_line = _build_week_summary_lines(day_list, items_by_date)
-
     blocks: list[str] = []
     for day in day_list:
-        weekday_name = WEEKDAYS.get(day.weekday(), day.strftime("%A"))
-        header_prefix = "📅 "
-        underline_char = WEEK_SEPARATOR[0] if WEEK_SEPARATOR else "—"
-        underline = (" " * len(header_prefix)) + (underline_char * len(str(weekday_name)))
-        header = f"{header_prefix}{weekday_name} ({day.strftime('%d.%m')})\n{underline}"
-        body = _build_day_body(items_by_date.get(day.isoformat(), []))
-        blocks.append((header + "\n" + body).strip())
+        day_items = items_by_date.get(day.isoformat(), [])
+        if not day_items:
+            continue
+        blocks.append(build_day_message(day, day_items, tz))
+
+    title = "📅 Ваше расписание!"
+    if not blocks:
+        return (title + "\n\n" + "Занятий нет 🎉").strip()
 
     # Use two blank lines between day blocks for readability.
-    return (summary_line + "\n" + busy_line + "\n\n" + "\n\n\n".join(blocks)).strip()
+    return (title + "\n\n" + "\n\n\n".join(blocks)).strip()
 
 
 def _build_week_summary_lines(

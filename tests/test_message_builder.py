@@ -169,17 +169,20 @@ def test_build_week_range_message_summary_and_day_blocks():
     msg = build_week_range_message(date_from, date_to, items, "Europe/Moscow")
 
     lines = msg.splitlines()
-    assert lines[0] == "Пн🟧  Вт🟩  Ср🟧  Чт🟩  Пт🟩  Сб🟧"
-    assert lines[1] == "Пн 10:00, Ср 12:00, Сб 20:00"
+    assert lines[0] == "📅 Ваше расписание!"
 
-    # No "top frame" separator line; only underline under weekday
-    assert "━━━━━━━━━━━━━━" not in lines
-    assert "📅 Понедельник (02.10)" in msg
-    assert f"  {'━' * len('Понедельник')}" in msg
-    assert "📅 Суббота (07.10)" in msg
-    assert f"  {'━' * len('Суббота')}" in msg
+    # Includes only days with classes
+    assert "📅 02.10.2023 Понедельник" in msg
+    assert "📅 04.10.2023 Среда" in msg
+    assert "📅 07.10.2023 Суббота" in msg
+
+    # Skips empty days
+    assert "📅 03.10.2023" not in msg
+    assert "📅 05.10.2023" not in msg
+    assert "📅 06.10.2023" not in msg
+
     # Two blank lines between day blocks => 3 newlines before next header line
-    assert msg.count("\n\n\n📅 ") == 5
+    assert msg.count("\n\n\n📅 ") == 2
 
 
 def test_build_week_brief_message_matches_week_prefix():
@@ -208,5 +211,5 @@ def test_build_week_brief_message_matches_week_prefix():
     brief = build_week_brief_message(date_from, date_to, items, "Europe/Moscow")
     full = build_week_range_message(date_from, date_to, items, "Europe/Moscow")
 
-    assert full.startswith(brief + "\n\n")
     assert len(brief.splitlines()) == 2
+    assert full.startswith("📅 Ваше расписание!\n\n")
