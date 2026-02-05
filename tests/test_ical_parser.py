@@ -178,3 +178,52 @@ def test_parse_ical_prefers_real_teacher_over_group_code():
     item = parsed.items[0]
     assert item.subject == "Math\nВИС33"
     assert item.teacher == "Prof X"
+
+
+def test_parse_ical_uses_organizer_cn_when_description_has_group_only():
+    ics_text = textwrap.dedent(
+        """
+        BEGIN:VCALENDAR
+        VERSION:2.0
+        BEGIN:VEVENT
+        UID:evt-org
+        DTSTART:20260124T090000Z
+        DTEND:20260124T103000Z
+        SUMMARY:Math
+        ORGANIZER;CN=Prof X:mailto:prof@example.com
+        DESCRIPTION:Teacher: ВИС33
+        END:VEVENT
+        END:VCALENDAR
+        """
+    ).strip()
+
+    parsed = parse_ical(ics_text, "UTC")
+
+    assert len(parsed.items) == 1
+    item = parsed.items[0]
+    assert item.subject == "Math\nВИС33"
+    assert item.teacher == "Prof X"
+
+
+def test_parse_ical_extracts_teacher_from_plain_text_description_line():
+    ics_text = textwrap.dedent(
+        """
+        BEGIN:VCALENDAR
+        VERSION:2.0
+        BEGIN:VEVENT
+        UID:evt-plain
+        DTSTART:20260124T090000Z
+        DTEND:20260124T103000Z
+        SUMMARY:Math
+        DESCRIPTION:ВИС33\\nст.пр.Корбан Анна Николаевна
+        END:VEVENT
+        END:VCALENDAR
+        """
+    ).strip()
+
+    parsed = parse_ical(ics_text, "UTC")
+
+    assert len(parsed.items) == 1
+    item = parsed.items[0]
+    assert item.subject == "Math\nВИС33"
+    assert item.teacher == "ст.пр.Корбан Анна Николаевна"

@@ -30,6 +30,23 @@ def _looks_like_group_code(value: str) -> bool:
     return bool(_GROUP_CODE_RE.match(raw))
 
 
+def _looks_like_teacher_name(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return False
+    if "@" in raw or raw.lower().startswith("mailto:"):
+        return False
+    if _looks_like_group_code(raw):
+        return False
+    # Most teachers are printed as: "доц.Фамилия Имя Отчество" or "Фамилия Имя Отчество"
+    # => at least 2 spaces / 3 tokens is a strong signal.
+    if raw.count(" ") >= 2:
+        return True
+    # Accept shorter formats like "Prof X" / "Dr. Y" as a fallback.
+    tokens = [t for t in raw.replace("\t", " ").split(" ") if t]
+    return len(tokens) >= 2
+
+
 def parse_ical(
     ical_text: str,
     default_tz: str,
@@ -239,10 +256,26 @@ def _extract_event_fields(component) -> tuple[str, Optional[str], Optional[str]]
         elif collapsed:
             teacher = collapsed
 
+    # If "teacher" still looks like a group code, treat it as a group and keep searching
+    # for the actual teacher name in other iCal fields.
+    if teacher and _looks_like_group_code(teacher):
+        parsed_group = parsed_group or teacher
+        teacher = None
+
     if not teacher:
         organizer_teacher = _extract_teacher_from_organizer(component)
-        if organizer_teacher:
+        if organizer_teacher and _looks_like_teacher_name(organizer_teacher):
             teacher = organizer_teacher
+
+    if not teacher:
+        contact_teacher = _extract_teacher_from_contact(component)
+        if contact_teacher and _looks_like_teacher_name(contact_teacher):
+            teacher = contact_teacher
+
+    if not teacher:
+        attendee_teacher = _extract_teacher_from_attendees(component)
+        if attendee_teacher and _looks_like_teacher_name(attendee_teacher):
+            teacher = attendee_teacher
 
     if parsed_group and subject and parsed_group not in subject:
         subject = f"{subject}\n{parsed_group}"
@@ -268,6 +301,50 @@ def _extract_teacher_from_organizer(component) -> Optional[str]:
         pass
 
     return None
+
+
+def _extract_teacher_from_contact(component) -> Optional[str]:
+    contact = component.get("contact")
+    if not contact:
+        return None
+    value = _as_text(contact)
+    if not value:
+        return None
+    value = value.strip()
+    if not value or _looks_like_group_code(value):
+        return None
+    return value
+
+
+def _extract_teacher_from_attendees(component) -> Optional[str]:
+    attendees = component.get("attendee")
+    if not attendees:
+        return None
+
+    values = attendees if isinstance(attendees, list) else [attendees]
+    candidates: list[str] = []
+    for attendee in values:
+        try:
+            params = getattr(attendee, "params", None)
+            cn = None if not params else (params.get("CN") or params.get("cn"))
+            if isinstance(cn, list):
+                cn = cn[0] if cn else None
+            if cn is not None:
+                name = str(cn).strip()
+                if name and not _looks_like_group_code(name):
+                    candidates.append(name)
+                    continue
+        except Exception:
+            pass
+
+        text = _as_text(attendee)
+        if text and not _looks_like_group_code(text) and "@" not in text and not text.lower().startswith("mailto:"):
+            candidates.append(text.strip())
+
+    for c in candidates:
+        if _looks_like_teacher_name(c):
+            return c
+    return candidates[0] if candidates else None
 
 
 def _append_single_event(
@@ -480,6 +557,9 @@ def _parse_description_fields(
     if not description:
         return None, None, None, []
 
+    # Some providers keep literal "\n" sequences instead of newlines.
+    description = description.replace("\\n", "\n").replace("\\N", "\n")
+
     teacher = None
     room = None
     group = None
@@ -502,6 +582,8 @@ def _parse_description_fields(
         else:
             if group is None and _looks_like_group_code(cleaned):
                 group = cleaned
+            elif teacher is None and _looks_like_teacher_name(cleaned):
+                teacher = cleaned
             else:
                 free_text.append(cleaned)
             continue
