@@ -31,6 +31,20 @@ STATUS_HAS_CLASSES = "🟧"
 STATUS_NO_CLASSES = "🟩"
 
 
+def _looks_like_group_code(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw or " " in raw:
+        return False
+    if len(raw) > 24:
+        return False
+    has_digit = any(ch.isdigit() for ch in raw)
+    has_letter = any(ch.isalpha() for ch in raw)
+    if not (has_digit and has_letter):
+        return False
+    allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя0123456789-_.")
+    return all(ch in allowed for ch in raw)
+
+
 def _parse_hhmm(value: str) -> time | None:
     raw = (value or "").strip()
     if len(raw) >= 5:
@@ -54,11 +68,24 @@ def _build_day_body(items: list[ScheduleItem]) -> str:
         block_lines: list[str] = []
         block_lines.append(f"🕘 {time_str}".rstrip())
 
-        if item.subject:
-            block_lines.append(html.escape(str(item.subject)))
+        subject = str(item.subject).strip() if item.subject else ""
+        teacher_raw = str(item.teacher).strip() if item.teacher else ""
 
-        if item.teacher:
-            teacher = html.escape(str(item.teacher))
+        group_line: str | None = None
+        teacher_line: str | None = teacher_raw or None
+        if teacher_raw and _looks_like_group_code(teacher_raw):
+            group_line = teacher_raw
+            teacher_line = None
+
+        if subject:
+            block_lines.append(html.escape(subject))
+            if group_line and group_line not in subject:
+                block_lines.append(html.escape(group_line))
+        elif group_line:
+            block_lines.append(html.escape(group_line))
+
+        if teacher_line:
+            teacher = html.escape(teacher_line)
             block_lines.append(f"Преподаватель: {teacher}")
 
         if item.room:

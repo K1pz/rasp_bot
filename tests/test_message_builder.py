@@ -46,6 +46,25 @@ def test_build_day_message_items():
     assert "10:30&amp;" in msg
     assert re.search(r"10:30&(?!amp;)", msg) is None
 
+def test_build_day_message_group_code_in_teacher_is_not_labeled_teacher():
+    d = date(2023, 10, 2)  # Monday
+    items = [
+        ScheduleItem(
+            date="2023-10-02",
+            start_time="09:00",
+            end_time="10:30",
+            room="101",
+            subject="Math",
+            teacher="ВИС33",
+        )
+    ]
+
+    msg = build_day_message(d, items, "Europe/Moscow")
+
+    assert "Math" in msg
+    assert "\nВИС33\n" in msg
+    assert "Преподаватель: ВИС33" not in msg
+
 def test_build_day_message_escapes_start_end_time():
     d = date(2023, 10, 3) # Tuesday
     items = [

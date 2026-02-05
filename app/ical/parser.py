@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Optional, List, Iterable
 from zoneinfo import ZoneInfo
@@ -12,6 +13,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RECURRENCE_WINDOW_DAYS = 366
 MAX_RECURRENCE_OCCURRENCES = 5000
+
+
+_GROUP_CODE_RE = re.compile(
+    r"^(?=.*[A-Za-zА-Яа-яЁё])(?=.*\d)[A-Za-zА-Яа-яЁё\d][A-Za-zА-Яа-яЁё\d_\-./]{1,30}$"
+)
+
+
+def _looks_like_group_code(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw or " " in raw:
+        return False
+    # Keep it conservative: avoid treating long free text as a group.
+    if len(raw) > 24:
+        return False
+    return bool(_GROUP_CODE_RE.match(raw))
 
 
 def parse_ical(
@@ -208,19 +224,50 @@ def _extract_event_fields(component) -> tuple[str, Optional[str], Optional[str]]
     subject = _as_text(component.get("summary")) or "Предмет не указан"
     room = _as_text(component.get("location"))
     description = _as_text(component.get("description"))
-    parsed_room, parsed_teacher = _parse_description_fields(description)
+    parsed_room, parsed_teacher, parsed_group, free_text = _parse_description_fields(description)
 
     if not room:
         room = parsed_room
 
-    if parsed_teacher:
+    teacher = None
+    if parsed_teacher and not _looks_like_group_code(parsed_teacher):
         teacher = parsed_teacher
-    elif description:
-        teacher = _collapse_text(description)
-    else:
-        teacher = None
+    elif free_text:
+        collapsed = _collapse_text("\n".join(free_text))
+        if _looks_like_group_code(collapsed):
+            parsed_group = parsed_group or collapsed
+        elif collapsed:
+            teacher = collapsed
+
+    if not teacher:
+        organizer_teacher = _extract_teacher_from_organizer(component)
+        if organizer_teacher:
+            teacher = organizer_teacher
+
+    if parsed_group and subject and parsed_group not in subject:
+        subject = f"{subject}\n{parsed_group}"
 
     return subject, room, teacher
+
+
+def _extract_teacher_from_organizer(component) -> Optional[str]:
+    organizer = component.get("organizer")
+    if organizer is None:
+        return None
+
+    try:
+        params = getattr(organizer, "params", None)
+        cn = None if not params else (params.get("CN") or params.get("cn"))
+        if isinstance(cn, list):
+            cn = cn[0] if cn else None
+        if cn is not None:
+            value = str(cn).strip()
+            if value and not _looks_like_group_code(value):
+                return value
+    except Exception:
+        pass
+
+    return None
 
 
 def _append_single_event(
@@ -427,14 +474,19 @@ def _iter_rule_datetimes(
     return dates
 
 
-def _parse_description_fields(description: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+def _parse_description_fields(
+    description: Optional[str],
+) -> tuple[Optional[str], Optional[str], Optional[str], list[str]]:
     if not description:
-        return None, None
+        return None, None, None, []
 
     teacher = None
     room = None
+    group = None
+    free_text: list[str] = []
 
     teacher_keys = {"преподаватель", "преп", "teacher", "lecturer", "instructor"}
+    group_keys = {"группа", "group", "grp", "гр"}
     room_keys = {"аудитория", "ауд", "кабинет", "room", "location"}
 
     lines = description.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -448,6 +500,10 @@ def _parse_description_fields(description: Optional[str]) -> tuple[Optional[str]
         elif " - " in cleaned:
             key, value = cleaned.split(" - ", 1)
         else:
+            if group is None and _looks_like_group_code(cleaned):
+                group = cleaned
+            else:
+                free_text.append(cleaned)
             continue
 
         key = key.strip().lower()
@@ -455,14 +511,24 @@ def _parse_description_fields(description: Optional[str]) -> tuple[Optional[str]
         if not value:
             continue
 
-        if _key_matches(key, teacher_keys) and teacher is None:
-            teacher = value
+        if _key_matches(key, group_keys) and group is None:
+            group = value
+            continue
+
+        if _key_matches(key, teacher_keys):
+            if _looks_like_group_code(value):
+                if group is None:
+                    group = value
+                continue
+            # Allow replacement if earlier "teacher" looked like a group code.
+            if teacher is None or _looks_like_group_code(teacher):
+                teacher = value
             continue
 
         if _key_matches(key, room_keys) and room is None:
             room = value
 
-    return room, teacher
+    return room, teacher, group, free_text
 
 
 def _key_matches(key: str, candidates: set[str]) -> bool:
