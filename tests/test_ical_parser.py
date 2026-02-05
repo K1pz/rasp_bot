@@ -34,6 +34,30 @@ def test_parse_ical_fixture():
     assert second.teacher == "Prof Y"
     assert second.ical_uid == "evt-2"
 
+def test_parse_ical_reads_teacher_from_x_alt_desc_html():
+    ics_text = textwrap.dedent(
+        """
+        BEGIN:VCALENDAR
+        VERSION:2.0
+        BEGIN:VEVENT
+        UID:evt-html
+        DTSTART:20260124T090000Z
+        DTEND:20260124T103000Z
+        SUMMARY:Math
+        X-ALT-DESC;FMTTYPE=text/html:<html><body>VIS33<br>Teacher: Prof X<br>Room: 101</body></html>
+        END:VEVENT
+        END:VCALENDAR
+        """
+    ).strip()
+
+    parsed = parse_ical(ics_text, "UTC")
+
+    assert len(parsed.items) == 1
+    item = parsed.items[0]
+    assert item.subject == "Math\nVIS33"
+    assert item.teacher == "Prof X"
+    assert item.room == "101"
+
 
 def test_parse_ical_bad_payload():
     parsed = parse_ical("not-ical", "UTC")
@@ -216,6 +240,30 @@ def test_parse_ical_extracts_teacher_from_plain_text_description_line():
         DTEND:20260124T103000Z
         SUMMARY:Math
         DESCRIPTION:ВИС33\\nст.пр.Корбан Анна Николаевна
+        END:VEVENT
+        END:VCALENDAR
+        """
+    ).strip()
+
+    parsed = parse_ical(ics_text, "UTC")
+
+    assert len(parsed.items) == 1
+    item = parsed.items[0]
+    assert item.subject == "Math\nВИС33"
+    assert item.teacher == "ст.пр.Корбан Анна Николаевна"
+
+
+def test_parse_ical_splits_group_and_teacher_from_single_line():
+    ics_text = textwrap.dedent(
+        """
+        BEGIN:VCALENDAR
+        VERSION:2.0
+        BEGIN:VEVENT
+        UID:evt-combo
+        DTSTART:20260124T090000Z
+        DTEND:20260124T103000Z
+        SUMMARY:Math
+        DESCRIPTION:ВИС33 ст.пр.Корбан Анна Николаевна
         END:VEVENT
         END:VCALENDAR
         """

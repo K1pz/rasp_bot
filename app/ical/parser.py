@@ -1,5 +1,6 @@
 import logging
 import re
+import html as _html
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Optional, List, Iterable
 from zoneinfo import ZoneInfo
@@ -45,6 +46,100 @@ def _looks_like_teacher_name(value: str) -> bool:
     # Accept shorter formats like "Prof X" / "Dr. Y" as a fallback.
     tokens = [t for t in raw.replace("\t", " ").split(" ") if t]
     return len(tokens) >= 2
+
+
+def _normalize_text_lines(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    text = str(value)
+    text = text.replace("\\n", "\n").replace("\\N", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in text.split("\n")]
+    return [line for line in lines if line]
+
+
+_HTML_BR_RE = re.compile(r"(?i)<br\s*/?>")
+_HTML_TAG_RE = re.compile(r"(?s)<[^>]+>")
+
+
+def _html_to_text(value: str) -> str:
+    if not value:
+        return ""
+    # Convert common line breaks first, then strip remaining tags.
+    text = _HTML_BR_RE.sub("\n", value)
+    text = _HTML_TAG_RE.sub("", text)
+    return _html.unescape(text)
+
+
+def _get_component_text(component, key: str) -> Optional[str]:
+    prop = component.get(key)
+    if prop is None:
+        return None
+    try:
+        # Some properties (like X-ALT-DESC) can be a list.
+        if isinstance(prop, list):
+            parts = [str(p) for p in prop if p is not None]
+            return "\n".join([p for p in parts if p.strip()]) or None
+        return str(prop)
+    except Exception:
+        return None
+
+
+def _get_description_text(component) -> Optional[str]:
+    # Prefer plain DESCRIPTION, but also fall back to X-ALT-DESC (often HTML).
+    description = _get_component_text(component, "description")
+
+    alt = component.get("x-alt-desc") or component.get("X-ALT-DESC")
+    alt_text = None
+    if alt is not None:
+        try:
+            raw = str(alt)
+            fmttype = None
+            params = getattr(alt, "params", None)
+            if params:
+                fmttype = params.get("FMTTYPE") or params.get("fmttype")
+                if isinstance(fmttype, list):
+                    fmttype = fmttype[0] if fmttype else None
+            if fmttype and str(fmttype).lower() == "text/html":
+                alt_text = _html_to_text(raw)
+            else:
+                alt_text = raw
+        except Exception:
+            alt_text = None
+
+    if description and alt_text:
+        return f"{description}\n{alt_text}".strip()
+    return (description or alt_text or None)
+
+
+_TEXT_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9_\-./]{1,30}")
+
+
+def _extract_group_and_teacher_from_text(value: str) -> tuple[Optional[str], Optional[str]]:
+    raw = (value or "").strip()
+    if not raw:
+        return None, None
+
+    group: Optional[str] = None
+    teacher: Optional[str] = None
+
+    if _looks_like_group_code(raw):
+        return raw, None
+
+    for match in _TEXT_TOKEN_RE.finditer(raw):
+        token = match.group(0)
+        if _looks_like_group_code(token):
+            group = token
+            break
+
+    if group:
+        remainder = raw.replace(group, " ", 1)
+        remainder = remainder.replace("|", " ").replace(";", " ").replace(",", " ")
+        remainder = " ".join([t for t in remainder.split() if t])
+        if _looks_like_teacher_name(remainder):
+            teacher = remainder
+
+    return group, teacher
 
 
 def parse_ical(
@@ -238,10 +333,18 @@ def _is_cancelled(component) -> bool:
 
 
 def _extract_event_fields(component) -> tuple[str, Optional[str], Optional[str]]:
-    subject = _as_text(component.get("summary")) or "Предмет не указан"
+    summary_raw = _get_component_text(component, "summary")
+    summary_lines = _normalize_text_lines(summary_raw)
+    subject = (summary_lines[0] if summary_lines else None) or "Предмет не указан"
     room = _as_text(component.get("location"))
-    description = _as_text(component.get("description"))
-    parsed_room, parsed_teacher, parsed_group, free_text = _parse_description_fields(description)
+
+    description_text = _get_description_text(component)
+    all_lines = []
+    if len(summary_lines) > 1:
+        all_lines.extend(summary_lines[1:])
+    all_lines.extend(_normalize_text_lines(description_text))
+
+    parsed_room, parsed_teacher, parsed_group, free_text = _parse_description_fields(all_lines)
 
     if not room:
         room = parsed_room
@@ -552,13 +655,10 @@ def _iter_rule_datetimes(
 
 
 def _parse_description_fields(
-    description: Optional[str],
+    lines: list[str],
 ) -> tuple[Optional[str], Optional[str], Optional[str], list[str]]:
-    if not description:
+    if not lines:
         return None, None, None, []
-
-    # Some providers keep literal "\n" sequences instead of newlines.
-    description = description.replace("\\n", "\n").replace("\\N", "\n")
 
     teacher = None
     room = None
@@ -569,9 +669,8 @@ def _parse_description_fields(
     group_keys = {"группа", "group", "grp", "гр"}
     room_keys = {"аудитория", "ауд", "кабинет", "room", "location"}
 
-    lines = description.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for line in lines:
-        cleaned = line.strip().replace("\t", " ")
+        cleaned = (line or "").strip().replace("\t", " ")
         if not cleaned:
             continue
 
@@ -580,9 +679,12 @@ def _parse_description_fields(
         elif " - " in cleaned:
             key, value = cleaned.split(" - ", 1)
         else:
-            if group is None and _looks_like_group_code(cleaned):
-                group = cleaned
-            elif teacher is None and _looks_like_teacher_name(cleaned):
+            extracted_group, extracted_teacher = _extract_group_and_teacher_from_text(cleaned)
+            if group is None and extracted_group:
+                group = extracted_group
+            if teacher is None and extracted_teacher:
+                teacher = extracted_teacher
+            elif teacher is None and _looks_like_teacher_name(cleaned) and not extracted_group:
                 teacher = cleaned
             else:
                 free_text.append(cleaned)
@@ -598,6 +700,13 @@ def _parse_description_fields(
             continue
 
         if _key_matches(key, teacher_keys):
+            extracted_group, extracted_teacher = _extract_group_and_teacher_from_text(value)
+            if extracted_group and group is None:
+                group = extracted_group
+            if extracted_teacher:
+                if teacher is None or _looks_like_group_code(teacher):
+                    teacher = extracted_teacher
+                continue
             if _looks_like_group_code(value):
                 if group is None:
                     group = value
