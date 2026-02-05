@@ -1,7 +1,13 @@
 import pytest
 import re
 from datetime import date
-from app.services.message_builder import build_day_message, build_range_message, build_week_range_message, split_telegram
+from app.services.message_builder import (
+    build_day_message,
+    build_range_message,
+    build_week_brief_message,
+    build_week_range_message,
+    split_telegram,
+)
 from app.db.models import ScheduleItem
 
 def test_build_day_message_no_items():
@@ -166,6 +172,39 @@ def test_build_week_range_message_summary_and_day_blocks():
     assert lines[0] == "Пн🟧  Вт🟩  Ср🟧  Чт🟩  Пт🟩  Сб🟧"
     assert lines[1] == "Пн 10:00, Ср 12:00, Сб 20:00"
 
-    assert "━━━━━━━━━━━━━━" in msg
+    # No "top frame" separator line; only underline under weekday
+    assert "━━━━━━━━━━━━━━" not in lines
     assert "📅 Понедельник (02.10)" in msg
+    assert f"  {'━' * len('Понедельник')}" in msg
     assert "📅 Суббота (07.10)" in msg
+    assert f"  {'━' * len('Суббота')}" in msg
+
+
+def test_build_week_brief_message_matches_week_prefix():
+    date_from = date(2023, 10, 2)  # Monday
+    date_to = date(2023, 10, 7)  # Saturday
+
+    items = [
+        ScheduleItem(
+            date="2023-10-02",
+            start_time="09:00",
+            end_time="10:00",
+            room="101",
+            subject="Math",
+            teacher="Teacher",
+        ),
+        ScheduleItem(
+            date="2023-10-04",
+            start_time="11:00",
+            end_time="12:00",
+            room="202",
+            subject="Physics",
+            teacher="Teacher 2",
+        ),
+    ]
+
+    brief = build_week_brief_message(date_from, date_to, items, "Europe/Moscow")
+    full = build_week_range_message(date_from, date_to, items, "Europe/Moscow")
+
+    assert full.startswith(brief + "\n\n")
+    assert len(brief.splitlines()) == 2
