@@ -166,7 +166,8 @@ def build_week_range_message(date_from: date, date_to: date, items: list[Schedul
         body = _build_day_body(items_by_date.get(day.isoformat(), []))
         blocks.append((header + "\n" + body).strip())
 
-    return (summary_line + "\n" + busy_line + "\n\n" + "\n\n".join(blocks)).strip()
+    # Use two blank lines between day blocks for readability.
+    return (summary_line + "\n" + busy_line + "\n\n" + "\n\n\n".join(blocks)).strip()
 
 
 def _build_week_summary_lines(

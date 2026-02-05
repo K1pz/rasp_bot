@@ -178,6 +178,8 @@ def test_build_week_range_message_summary_and_day_blocks():
     assert f"  {'━' * len('Понедельник')}" in msg
     assert "📅 Суббота (07.10)" in msg
     assert f"  {'━' * len('Суббота')}" in msg
+    # Two blank lines between day blocks => 3 newlines before next header line
+    assert msg.count("\n\n\n📅 ") == 5
 
 
 def test_build_week_brief_message_matches_week_prefix():
